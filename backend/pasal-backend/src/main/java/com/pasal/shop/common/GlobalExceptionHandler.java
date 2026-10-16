@@ -16,7 +16,11 @@ import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.HttpMediaTypeNotSupportedException;
+import org.springframework.web.HttpRequestMethodNotSupportedException;
+import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
+import org.springframework.web.servlet.resource.NoResourceFoundException;
 
 import com.pasal.shop.common.Exceptions.BadRequestException;
 import com.pasal.shop.common.Exceptions.ConflictException;
@@ -73,6 +77,15 @@ public class GlobalExceptionHandler {
     ResponseEntity<ErrorResponse> integrity(DataIntegrityViolationException e) {
         log.warn("Data integrity violation", e);
         return build(HttpStatus.CONFLICT, "The request conflicts with existing data", null);
+    }
+
+    /** Unknown URL (404), wrong method (405), unsupported media type (415), missing parameter (400): keep Spring's status. */
+    @ExceptionHandler({ NoResourceFoundException.class, HttpRequestMethodNotSupportedException.class,
+            HttpMediaTypeNotSupportedException.class, MissingServletRequestParameterException.class })
+    ResponseEntity<ErrorResponse> springWebError(Exception e) {
+        HttpStatus status = HttpStatus.valueOf(((org.springframework.web.ErrorResponse) e).getStatusCode().value());
+        String message = status == HttpStatus.NOT_FOUND ? "Not found" : e.getMessage();
+        return build(status, message, null);
     }
 
     @ExceptionHandler(Exception.class)
