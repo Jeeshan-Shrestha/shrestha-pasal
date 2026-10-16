@@ -2,7 +2,7 @@
   "rewrites": [
     {
       "source": "/api/:path*",
-      "destination": "https://REPLACE-WITH-YOUR-RENDER-SERVICE.onrender.com/api/:path*"
+      "destination": "https://pasal-backend-a7rg.onrender.com"
     },
     { "source": "/(.*)", "destination": "/index.html" }
   ]
