@@ -17,15 +17,28 @@ public record AppProperties(Jwt jwt, Shop shop, Admin admin, Cors cors, Alerts a
     public record Admin(String email, String password, String fullName) {
     }
 
-    /** Emails the shop owner on each new order. Disabled unless the Gmail username, app password and recipient are set. */
-    public record Alerts(String mailUsername, String mailPassword, String ownerEmail) {
-        public boolean enabled() {
-            return notBlank(mailUsername) && notBlank(mailPassword);
+    /**
+     * Order emails. Two transports: Brevo's HTTPS API (needed on hosts that block SMTP ports, e.g. Render free)
+     * when {@code brevoApiKey} is set, otherwise Gmail SMTP when username and app password are set.
+     */
+    public record Alerts(String mailUsername, String mailPassword, String ownerEmail, String brevoApiKey,
+            String fromEmail) {
+        public boolean useBrevo() {
+            return notBlank(brevoApiKey) && notBlank(fromAddress());
         }
 
-        /** An empty OWNER_EMAIL falls back to the sending Gmail account. */
+        public boolean enabled() {
+            return useBrevo() || (notBlank(mailUsername) && notBlank(mailPassword));
+        }
+
+        /** Sender address: MAIL_FROM (must be a verified Brevo sender) or the Gmail account. */
+        public String fromAddress() {
+            return notBlank(fromEmail) ? fromEmail : mailUsername;
+        }
+
+        /** An empty OWNER_EMAIL falls back to the sending address. */
         public String recipient() {
-            return notBlank(ownerEmail) ? ownerEmail : mailUsername;
+            return notBlank(ownerEmail) ? ownerEmail : fromAddress();
         }
 
         private static boolean notBlank(String v) {

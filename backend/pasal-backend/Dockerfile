@@ -13,4 +13,6 @@ RUN addgroup -S app && adduser -S app -G app
 COPY --from=build /app/target/*.jar app.jar
 USER app
 EXPOSE 8080
-ENTRYPOINT ["java", "-jar", "app.jar"]
+# Tuned for 512 MB hosts (Render free): cap the heap at 70% of container RAM, small thread stacks, serial GC.
+ENV JAVA_OPTS="-XX:MaxRAMPercentage=70 -Xss512k -XX:+UseSerialGC -XX:TieredStopAtLevel=1"
+ENTRYPOINT ["sh", "-c", "exec java $JAVA_OPTS -jar app.jar"]

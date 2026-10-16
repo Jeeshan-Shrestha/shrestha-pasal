@@ -101,7 +101,7 @@ public class OrderService {
 
         orders.save(order);
         cartItems.deleteAllByUserId(userId);
-        events.publishEvent(new OrderPlacedEvent(OrderAlertMessage.subject(order), OrderAlertMessage.build(order)));
+        events.publishEvent(new OrderPlacedEvent(OrderSnapshot.from(order)));
         return OrderResponse.from(order, false);
     }
 
@@ -122,7 +122,7 @@ public class OrderService {
             throw new BadRequestException(
                     "This order is already " + o.getStatus().name().toLowerCase() + " and can no longer be cancelled");
         }
-        cancel(o);
+        cancel(o, true);
         return OrderResponse.from(o, false);
     }
 
@@ -146,7 +146,7 @@ public class OrderService {
             throw new BadRequestException("Cannot move an order from " + o.getStatus() + " to " + next);
         }
         if (next == OrderStatus.CANCELLED) {
-            cancel(o);
+            cancel(o, false);
         } else {
             o.setStatus(next);
             if (next == OrderStatus.DELIVERED) {
@@ -158,7 +158,7 @@ public class OrderService {
 
     // ---- helpers ----
 
-    private void cancel(Order o) {
+    private void cancel(Order o, boolean byCustomer) {
         Map<Long, Product> locked = lock(o.getItems().stream().map(i -> i.getProduct().getId()).toList());
         for (OrderItem i : o.getItems()) {
             Product p = locked.get(i.getProduct().getId());
@@ -166,6 +166,7 @@ public class OrderService {
         }
         o.setStatus(OrderStatus.CANCELLED);
         o.setPaymentStatus(PaymentStatus.CANCELLED);
+        events.publishEvent(new OrderCancelledEvent(OrderSnapshot.from(o), byCustomer));
     }
 
     private Map<Long, Product> lock(List<Long> productIds) {

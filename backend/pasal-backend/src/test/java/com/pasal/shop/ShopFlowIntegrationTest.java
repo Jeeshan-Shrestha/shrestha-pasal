@@ -1,5 +1,8 @@
 package com.pasal.shop;
 
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.timeout;
+import static org.mockito.Mockito.verify;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
@@ -8,8 +11,14 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import java.util.List;
+
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.mail.SimpleMailMessage;
+import org.springframework.mail.javamail.JavaMailSender;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
@@ -23,7 +32,12 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 import com.jayway.jsonpath.JsonPath;
 
 /** Walks the whole customer + admin journey against a real PostgreSQL. */
-@SpringBootTest
+@SpringBootTest(properties = {
+        // never read the developer's real .env (real Gmail credentials, admin password) in tests
+        "app.env-file=./no-such-file",
+        "app.alerts.mail-username=shop@test.local",
+        "app.alerts.mail-password=test-password",
+        "app.alerts.owner-email=owner@test.local" })
 @AutoConfigureMockMvc
 @Testcontainers
 class ShopFlowIntegrationTest {
@@ -34,6 +48,10 @@ class ShopFlowIntegrationTest {
 
     @Autowired
     MockMvc mvc;
+
+    /** Replaces the real SMTP sender, so no email ever leaves the test. */
+    @MockitoBean
+    JavaMailSender mailSender;
 
     @Test
     void fullShoppingJourney() throws Exception {
@@ -53,6 +71,10 @@ class ShopFlowIntegrationTest {
                 .andExpect(status().isOk()).andExpect(jsonPath("$.email").value(email))
                 .andExpect(jsonPath("$.role").value("CUSTOMER"));
         mvc.perform(get("/api/users/me")).andExpect(status().isUnauthorized());
+        // unknown URLs and wrong methods must keep their real status, not turn into a 500
+        mvc.perform(get("/api/does-not-exist").header("Authorization", "Bearer " + customerToken))
+                .andExpect(status().isNotFound()).andExpect(jsonPath("$.message").value("Not found"));
+        mvc.perform(get("/api/auth/login")).andExpect(status().isMethodNotAllowed());
         mvc.perform(get("/api/users/me").header("Authorization", "Bearer garbage")).andExpect(status().isUnauthorized());
 
         // --- product CRUD is admin-only; browsing is public ---
@@ -136,6 +158,22 @@ class ShopFlowIntegrationTest {
         setStatus(adminToken, order2, "DELIVERED").andExpect(status().isOk())
                 .andExpect(jsonPath("$.paymentStatus").value("PAID"))
                 .andExpect(jsonPath("$.customer.email").value(email));
+
+        // --- emails: placed (order1, order2) + cancelled (order1), each to the owner and the customer ---
+        ArgumentCaptor<SimpleMailMessage> mails = ArgumentCaptor.forClass(SimpleMailMessage.class);
+        verify(mailSender, timeout(5000).times(6)).send(mails.capture());
+        List<String> sent = mails.getAllValues().stream()
+                .map(m -> m.getTo()[0] + " | " + m.getSubject()).toList();
+        assertThat(sent).anyMatch(s -> s.startsWith("owner@test.local | New order NSB-"));
+        assertThat(sent).anyMatch(s -> s.startsWith(email + " | Your order NSB-") && s.contains("is confirmed"));
+        assertThat(sent).anyMatch(s -> s.startsWith("owner@test.local | Order NSB-") && s.contains("cancelled by the customer"));
+        assertThat(sent).anyMatch(s -> s.startsWith(email + " | Your order NSB-") && s.contains("was cancelled"));
+        assertThat(sent).hasSize(6);
+        SimpleMailMessage confirmation = mails.getAllValues().stream()
+                .filter(m -> email.equals(m.getTo()[0]) && m.getSubject().contains("is confirmed")).findFirst().orElseThrow();
+        assertThat(confirmation.getFrom()).isEqualTo("shop@test.local");
+        assertThat(confirmation.getText()).contains("Hi Ram Shrestha").contains("2 x Steel Pressure Cooker")
+                .contains("Total:    Rs 2100.00").contains("Thamel, Kathmandu").contains("Note: Call first");
 
         // --- reviews ---
         long reviewId = id(json(post("/api/products/" + productId + "/reviews"),

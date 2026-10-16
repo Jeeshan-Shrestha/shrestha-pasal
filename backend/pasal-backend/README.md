@@ -55,3 +55,9 @@ Send `Authorization: Bearer <token>` (from register/login). Lists are paginated 
 - The schema is managed by Hibernate `ddl-auto=update`. Switch to Flyway migrations before the data matters.
 - `imageUrl` is a plain URL. File upload is not built yet.
 - Login has no rate limiting yet.
+
+## Order emails
+
+When an order is **placed** or **cancelled** (by the customer or by the admin), the app emails both the customer and the shop owner. Emails are sent after the order is saved, on a background thread, so a mail failure never affects an order.
+
+Set `MAIL_USERNAME` and `MAIL_PASSWORD` (a Google [app password](https://myaccount.google.com/apppasswords), not your login password) and optionally `OWNER_EMAIL` in `.env`. Running locally, the app reads `.env` from the project folder; Docker Compose passes the same values in. Check the startup log: `Order emails ON` or `Order emails OFF`, and `Order email sent to ...` for each message.
